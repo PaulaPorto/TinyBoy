@@ -1,0 +1,198 @@
+package tinyboycov.core;
+
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Random;
+import org.eclipse.jdt.annotation.Nullable;
+import tinyboy.core.ControlPad;
+import tinyboy.core.ControlPad.Button;
+import tinyboy.core.TinyBoyInputSequence;
+import tinyboy.util.AutomatedTester;
+
+/**
+ * The TinyBoy Input Generator is responsible for generating and refining inputs
+ * to try and ensure that sufficient branch coverage is obtained.
+ *
+ * @author David J. Pearce
+ *
+ */
+public class TinyBoyInputGenerator implements AutomatedTester.InputGenerator<TinyBoyInputSequence> {
+  /**
+ * Represents the number of buttons on the control pad.
+ */
+  private static final int NUM_BUTTONS = ControlPad.Button.values().length;
+  /**
+ * Current batch being processed.
+ */
+  private ArrayList<TinyBoyInputSequence> worklist = new ArrayList<>();
+  /**
+ * List of coverage that are passed in through record.
+ */
+  private HashMap<TinyBoyInputSequence, BitSet> inpCov = new HashMap<>();
+  /**
+ * List of coverage that are passed in through record.
+ */
+  private HashMap<TinyBoyInputSequence, byte[]> inpState = new HashMap<>();
+  /**
+ * List of coverage that are passed in through record.
+ */
+  private boolean bool = false;  
+  
+  /**
+ * Generates tiny boy with specific inputs.
+ */
+  public TinyBoyInputGenerator() {
+    Button [] buttons = ControlPad.Button.values();
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+      for (int j = 0; j < NUM_BUTTONS; j++) {
+        for (int g = 0; g < NUM_BUTTONS; g++) {
+          for (int w = 0; w < NUM_BUTTONS; w++) {
+            this.worklist.add(new TinyBoyInputSequence(buttons[i], buttons[j],
+                buttons[g], buttons[w]));
+          }
+        }
+      }
+    }
+  }
+  
+  /**
+ * Checks if the worklist is not empty.
+ *
+ * @return boolean.
+ */
+  @Override
+  public boolean hasMore() {
+    return this.worklist.size() > 0;
+  }
+
+  /**
+ * Returns the last input of the worklist.
+ *
+ * @return last input.
+ */
+  @Override
+  public @Nullable TinyBoyInputSequence generate() {
+    if (!this.worklist.isEmpty()) {
+      // remove last item from worklist
+      return this.worklist.remove(this.worklist.size() - 1);
+    }
+    return null;
+  }
+
+  /**
+ * A record returned from the fuzzer indicating the coverage and final state
+ * obtained for a given input sequence.
+ *
+ * @param input for tiny boy.
+ *        
+ * @param coverage of the inputs.
+ *
+ * @param state of the board.
+ */
+  @Override
+  public void record(TinyBoyInputSequence input, BitSet coverage, byte[] state) {
+    // NOTE: this method is called when fuzzing has finished for a given input. It
+    // produces three potentially useful items: firstly, the input sequence that was
+    // used for fuzzing; second, the set of instructions which were covered when
+    // executing that sequence; finally, the complete state of the machine's RAM at
+    // the end of the run.
+    //
+    // At this point, you will want to use the feedback gained from fuzzing to help
+    // prune the space of inputs to try next. A few helper methods are given below,
+    // but you will need to write a lot more.
+    Button U = null;
+    Button D = null;
+    Button L = null;
+    Button R = null;
+    this.inpCov.put(input, coverage);
+    this.inpState.put(input, state);
+    TinyBoyInputSequence bestInput = new TinyBoyInputSequence();
+    TinyBoyInputSequence finalInput = new TinyBoyInputSequence();
+    if (this.bool == false) {
+      bestInput = input;
+      this.bool = true;
+    } 
+    if (this.bool == true) {
+      for (TinyBoyInputSequence tbState : this.inpState.keySet()) {
+        if (this.inpState.get(tbState) == state) {
+          for (TinyBoyInputSequence tbCov : this.inpCov.keySet()) {
+            if ((subsumedBy((this.inpCov.get(tbCov)), coverage))) {
+              bestInput = input;
+            }
+          }
+        }
+      }
+      
+      U = ControlPad.Button.UP;
+      finalInput = bestInput.append(U);
+      this.worklist.add(finalInput);
+      
+      D = ControlPad.Button.DOWN;
+      finalInput = bestInput.append(D);
+      this.worklist.add(finalInput);
+      
+      L = ControlPad.Button.LEFT;
+      finalInput = bestInput.append(L);
+      this.worklist.add(finalInput);
+     
+      R = ControlPad.Button.RIGHT;
+      finalInput = bestInput.append(R);
+      this.worklist.add(finalInput);
+      
+      this.worklist.add(new TinyBoyInputSequence(L, L, D , U, U, R, R, R, R, D, L, L, L, D, R, R, R, D, D, U, R, R, R, R, 
+        D, L, D, U, U, U, R, D, L, L, L, D, L, L, D, U, D, U, R, D, U, L, L, L, L, L, D));
+    
+      randomSample(this.worklist, 10);
+      //this.worklist.add(finalInput);
+      
+//      Random r = new Random();
+//      int ran = r.nextInt(NUM_BUTTONS);
+//      b = ControlPad.Button.values()[ran];
+//      Random r2 = new Random();
+//      int ran2 = r2.nextInt(NUM_BUTTONS);
+//      b2 = ControlPad.Button.values()[ran2];
+//      randomSample(this.worklist, 10);
+//      this.worklist.add(bestInput.append(b));
+
+    }
+  }
+  
+  /**
+ * Check whether a given input sequence is completely subsumed by another.
+ *
+ * @param lhs
+ *            The one which may be subsumed.
+ * @param rhs
+ *            The one which may be subsuming.
+ * @return boolean 
+ *            (if its subsumed by = true if not = false).
+ */
+  public static boolean subsumedBy(BitSet lhs, BitSet rhs) {
+    for (int i = lhs.nextSetBit(0); i >= 0; i = lhs.nextSetBit(i + 1)) {
+      if (!rhs.get(i)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+ * Reduce a given set of items to at most <code>n</code> inputs by randomly
+ * sampling.
+ *
+ * @param inputs for the tiny boy.
+ *         
+ * @param n number of inputs.      
+ */
+  private static <T> void randomSample(List<T> inputs, int n) {
+    // Randomly shuffle inputs
+    Collections.shuffle(inputs);
+    // Remove inputs until only n remain
+    while (inputs.size() > n) {
+      inputs.remove(inputs.size() - 1);
+    }
+  }
+}
